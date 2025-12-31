@@ -1,2 +1,1 @@
 # chuanimages
-图床
