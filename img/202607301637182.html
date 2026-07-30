@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root{
+    --ink:#1f2d3d; --muted:#7b8a9c;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;
+    background:
+      radial-gradient(1100px 700px at 78% 4%, #eef4fb 0%, transparent 60%),
+      radial-gradient(900px 600px at 6% 30%, #eaf1f8 0%, transparent 55%),
+      #f6f9fc;
+    font-family:'Microsoft YaHei','Segoe UI',sans-serif;
+  }
+  .head{padding:30px 40px 6px}
+  h1{margin:0;color:#16233a;font-size:27px;letter-spacing:-.3px;text-align:center}
+  h1 code{font-family:'Cascadia Code','Consolas',monospace;color:#e8536b;background:#fff;padding:2px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(30,60,110,.08)}
+  .sub{text-align:center;color:#8493a6;margin:10px 0 0;font-size:14.5px}
+  .legend{display:flex;gap:18px;justify-content:center;flex-wrap:wrap;margin:16px 0 4px;font-size:13.5px;color:#5c6b7d}
+  .legend b{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid #e3ebf4;padding:6px 13px;border-radius:999px;font-weight:500;box-shadow:0 1px 4px rgba(30,60,110,.05)}
+  .dot{width:13px;height:13px;border-radius:4px;display:inline-block}
+  #graph{padding:16px 40px 48px;display:flex;justify-content:center}
+  .mermaid{font-family:'Microsoft YaHei','Segoe UI',sans-serif}
+
+  /* ---- mermaid polish ---- */
+  #graph svg .node rect{rx:11px;ry:11px}
+  #graph svg .node rect,
+  #graph svg .node polygon,
+  #graph svg .node circle,
+  #graph svg .node path{
+    filter:drop-shadow(0 3px 6px rgba(28,52,94,.14));
+    stroke-width:1.4px;
+  }
+  #graph svg .edgePaths path{stroke:#a9b8ca;stroke-width:1.7px}
+  #graph svg .marker{fill:#a9b8ca;stroke:#a9b8ca}
+  #graph svg .edgeLabel{font-size:12.5px;font-weight:600}
+  #graph svg .edgeLabel p,#graph svg .edgeLabel span,#graph svg .edgeLabel div{
+    background:#eef3f9;padding:1px 8px;border-radius:7px;color:#6a7a8c;
+    border:1px solid #e0e8f1;
+  }
+  .lbl-true p,.lbl-true span,.lbl-true div{color:#1f9d55 !important;background:#e6f7ee !important;border-color:#bfe8cf !important}
+  .lbl-false p,.lbl-false span,.lbl-false div{color:#c8433f !important;background:#fdecec !important;border-color:#f4cccc !important}
+  #graph svg .nodeLabel{font-weight:600}
+</style>
+</head>
+<body>
+<div class="head">
+  <h1>fastjson 1.2.25 · <code>checkAutoType()</code> 完整逻辑流程</h1>
+  <p class="sub">一张图穿起整个函数：三把「钥匙」判断 · 三层防御 · 每条 true / false 分支的去向</p>
+  <div class="legend">
+    <b><i class="dot" style="background:#e8536b"></i>关键钥匙判断 autoTypeSupport || expectClass!=null</b>
+    <b><i class="dot" style="background:#f0932b"></i>返回 / 加载放行</b>
+    <b><i class="dot" style="background:#27ae60"></i>期望类型校验</b>
+    <b><i class="dot" style="background:#fff;border:1px solid #c7d2e0"></i>抛异常 / 中间步骤</b>
+  </div>
+</div>
+<div id="graph">
+<pre class="mermaid">
+flowchart TD
+  start(["INPUT&nbsp;·&nbsp;@type = typeName"]) --> norm["className = typeName.replace('$','.')"]
+  norm --> g1{"③ autoTypeSupport<br/>|| expectClass != null ?"}
+
+  g1 -->|true| wl1{"③a 白名单<br/>acceptList 命中?"}
+  g1 -->|false| cache["④ getClassFromMapping(typeName)"]
+
+  wl1 -->|true| loadret["加载类并返回<br/>loadClass → RETURN"]
+  wl1 -->|false| bl1{"③b 黑名单<br/>denyList 命中?"}
+  bl1 -->|true| thr1["抛异常 THROW"]
+  bl1 -->|false| cache
+
+  cache --> c1{"clazz == null ?"}
+  c1 -->|true| find["deserializers.findClass(typeName)"]
+  c1 -->|false| c2{"⑤ clazz != null ?"}
+  find --> c2
+
+  c2 -->|true| exp1{"期望类非空<br/>且 !isAssignableFrom ?"}
+  c2 -->|false| notauto{"⑥ !autoTypeSupport ?"}
+  exp1 -->|true| thr2["抛异常 THROW"]
+  exp1 -->|false| ret1["返回类 return clazz"]
+
+  notauto -->|true| bl2{"6a 黑名单<br/>denyList 命中?"}
+  notauto -->|false| g2{"⑦ autoTypeSupport<br/>|| expectClass != null ?"}
+  bl2 -->|true| thr3["抛异常 THROW"]
+  bl2 -->|false| wl2{"6b 白名单<br/>acceptList 命中?"}
+  wl2 -->|true| load2["加载类 loadClass"]
+  wl2 -->|false| g2
+  load2 --> exp2{"期望类非空<br/>且 isAssignableFrom ?<br/>（逻辑写反）"}
+  exp2 -->|true| thr4["抛异常 THROW"]
+  exp2 -->|false| ret2["返回类 return clazz"]
+
+  g2 -->|true| load3["⑦ 加载类 loadClass(typeName)<br/>自动脱掉 L…; 外壳"]
+  g2 -->|false| c3{"clazz != null ?"}
+  load3 --> c3
+
+  c3 -->|true| typchk{"⑧a is ClassLoader<br/>|| is DataSource ?"}
+  c3 -->|false| notauto2{"⑨ !autoTypeSupport ?"}
+  typchk -->|true| thr5["抛异常 THROW"]
+  typchk -->|false| exp3{"⑧b expectClass != null ?"}
+  exp3 -->|true| isa{"expectClass<br/>.isAssignableFrom(clazz) ?"}
+  exp3 -->|false| notauto2
+  isa -->|true| ret3["返回类 return clazz"]
+  isa -->|false| thr6["抛异常 THROW"]
+
+  notauto2 -->|true| thr7["抛异常<br/>autoType is not support"]
+  notauto2 -->|false| ret4["return clazz"]
+
+  classDef key fill:#e8536b,stroke:#c9384f,color:#fff,font-weight:bold;
+  classDef ret fill:#f0932b,stroke:#cf7614,color:#fff;
+  classDef exp fill:#27ae60,stroke:#1e8c4c,color:#fff;
+  classDef io  fill:#3b5573,stroke:#2b415b,color:#fff;
+  classDef step fill:#ffffff,stroke:#c7d2e0,color:#2a3b4f;
+  classDef thr fill:#fbfcfe,stroke:#d6a0a0,color:#a23b3b;
+  class g1,g2 key;
+  class loadret,ret1,ret2,ret3,ret4,load3 ret;
+  class exp1,exp2,isa exp;
+  class start io;
+  class norm,cache,find,load2,step step;
+  class thr1,thr2,thr3,thr4,thr5,thr6,thr7 thr;
+</pre>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>
+  mermaid.initialize({
+    startOnLoad:false, theme:'base',
+    themeVariables:{
+      fontSize:'16px', fontFamily:'Microsoft YaHei, Segoe UI, sans-serif',
+      lineColor:'#a9b8ca', primaryColor:'#ffffff', primaryBorderColor:'#c7d2e0',
+      primaryTextColor:'#2a3b4f'
+    },
+    flowchart:{ nodeSpacing:40, rankSpacing:50, curve:'basis', useMaxWidth:false, htmlLabels:true }
+  });
+  window.__mmReady=false;
+  (async ()=>{
+    try{ await mermaid.run(); }catch(e){ document.title='MERMAID_ERROR:'+e.message; return; }
+    // 给 true/false 标签染色
+    document.querySelectorAll('#graph .edgeLabel').forEach(el=>{
+      const t=(el.textContent||'').trim();
+      if(t==='true') el.classList.add('lbl-true');
+      else if(t==='false') el.classList.add('lbl-false');
+    });
+    window.__mmReady=true;
+  })();
+</script>
+</body>
+</html>
